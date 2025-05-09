@@ -2,9 +2,9 @@
 #define __FASTAPI_CLIENT_API_REQUEST_HPP__
 
 #include <namespace.hpp>
-#include <iostream>
 #include <utils/string_utils.hpp>
 #include <string>
+#include <iostream>
 
 #define ASIO_STANDALONE
 
@@ -36,7 +36,7 @@ std::string KakaoDCBOT::fastapi::client::api_request::get_http_response(const st
 
 std::string KakaoDCBOT::fastapi::client::api_request::get_response_body(const std::string& host, const std::string& port, const std::string& target);
 
-
+std::string KakaoDCBOT::fastapi::client::api_request::get_response_body_as_json(const std::string& host, const std::string& port, const std::string& target);
 
 
 

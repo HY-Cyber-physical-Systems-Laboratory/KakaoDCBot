@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>캔버스 + XHR 통신</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      cursor: crosshair;
+    }
+    #scanButton {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      padding: 10px 20px;
+      font-size: 16px;
+      background: #0088cc;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #recordButton {
+      position: fixed;
+      top: 20px;
+      left: 120px;
+      z-index: 10;
+      padding: 10px 24px;
+      font-size: 16px;
+      background: #e83e8c;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #recordButton.recording {
+      background: #c82333;
+    }
+    #resultBox {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 10px;
+      border-radius: 6px;
+      font-family: monospace;
+      max-width: 50%;
+      max-height: 200px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <button id="scanButton">📡 Scan</button>
+  <button id="recordButton">🎤 Hold to Speak</button>
+  <div id="resultBox">결과가 여기에 표시됩니다</div>
+  <canvas id="myCanvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById("myCanvas");
+    const ctx = canvas.getContext("2d");
+    const resultBox = document.getElementById("resultBox");
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    let drawing = false;
+
+    canvas.addEventListener("mousedown", (e) => {
+      drawing = true;
+      ctx.beginPath();
+      ctx.moveTo(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (drawing) {
+        ctx.lineTo(e.clientX, e.clientY);
+        ctx.stroke();
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      drawing = false;
+    });
+
+    canvas.addEventListener("click", (e) => {
+      console.log("Click at: ", (e.clientX - canvas.width / 2) / 40, -(e.clientY - canvas.height / 2) / 40);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", `http://192.168.106.132:8080/api/navigation/goto?x=${(e.clientX - canvas.width / 2) / 40}&y=${-(e.clientY - canvas.height / 2) / 40}`, true);
+    
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === XMLHttpRequest.DONE) {
+          if (xhr.status === 200) {
+            console.log(xhr.responseText);
+           } else {
+            
+            resultBox.textContent = "❌ 요청 실패: " + xhr.status;
+          }
+        }
+      };
+
+      xhr.send();
+
+      ctx.beginPath();
+      ctx.arc(e.clientX, e.clientY, 4, 0, Math.PI * 2);
+      ctx.fillStyle = "red";
+      ctx.fill();
+    });
+
+
+    function locationApi(func) {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "http://192.168.106.132:8080/api/speed-control", true);
+    
+      xhr.onreadystatechange = function () {
+        const af_func = func || function(){};
+        if (xhr.readyState === XMLHttpRequest.DONE) {
+          if (xhr.status === 200) {
+            resultBox.textContent = (robot_loc = xhr.responseText);
+            af_func(JSON.parse(xhr.responseText));
+           } else {
+            
+            resultBox.textContent = "❌ 요청 실패: " + xhr.status;
+          }
+        }
+      };
+
+      xhr.send();
+    }
+
+
+    function drawBase64Image(mapImg, imgWidth = 400, imgHeight = 400) {
+        const x = (canvas.width - imgWidth) / 2;
+        const y = (canvas.height - imgHeight) / 2;
+        ctx.drawImage(mapImg, x, y, imgWidth, imgHeight);
+      }
+
+    // XHR 요청 함수
+    function scanApi(cb = () => {}) {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://192.168.106.132:8080/api/scan", true);
+
+        xhr.responseType = "json";      // 자동 JSON 파싱
+        xhr.timeout = 1500;             // 응답 지연 시 빠른 실패
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
+            cb(xhr.response);           // 이미 JS 객체
+            } else {
+            resultBox.textContent = `❌ 요청 실패: ${xhr.status}`;
+            }
+        };
+
+        xhr.onerror = () =>
+            (resultBox.textContent = "❌ 네트워크 오류");
+
+        xhr.ontimeout = () =>
+            (resultBox.textContent = "⏱️ 타임아웃");
+
+        xhr.send();
+    }
+    function drawMap() {
+    if (!window.mapdata) return;
+    const { map_resolution, map_height, map_width, map_offset_x, map_offset_y } = window.mapdata;
+
+    const SCALE = 40;
+
+    const imgW = map_width * SCALE * map_resolution;
+    const imgH = map_height * SCALE * map_resolution;
+
+    const originX = canvas.width / 2 + map_offset_x * SCALE;
+    const originY = canvas.height / 2 - map_offset_y * SCALE;
+
+    ctx.save();
+
+    // 이미지 맨 아래 기준으로 반전
+    ctx.translate(originX, originY + imgH);  // 맨 아래로 이동
+    ctx.scale(1, -1); // Y축 반전
+
+    ctx.drawImage(mapImg, 0, imgH, imgW, imgH); // 이제 위로 그려짐
+
+    ctx.restore();
+}
+
+
+    function mapdataApi(cb = () => {}) {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "http://192.168.106.132:8080/api/mapdata", true);
+
+        xhr.responseType = "json";      // 자동 JSON 파싱
+        xhr.timeout = 1500;             // 응답 지연 시 빠른 실패
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
+              window.mapImg = new Image();
+              mapImg.src = xhr.response.map_data;
+              
+
+              window.mapdata = xhr.response;
+            } else {
+            resultBox.textContent = `❌ 요청 실패: ${xhr.status}`;
+            }
+        };
+
+        xhr.onerror = () =>
+            (resultBox.textContent = "❌ 네트워크 오류");
+
+        xhr.ontimeout = () =>
+            (resultBox.textContent = "⏱️ 타임아웃");
+
+        xhr.send();
+    }
+    
+    function drawBase64Image(base64, imgWidth = 200, imgHeight = 200) {
+        const img = new Image();
+        img.src = base64;
+
+        img.onload = function () {
+            const centerX = (canvas.width - imgWidth) / 2;
+            const centerY = (canvas.height - imgHeight) / 2;
+
+            // 캔버스를 비우지 않으려면 이 줄을 제거하세요
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 이미지 크기와 위치 지정
+            ctx.drawImage(img, centerX, centerY, imgWidth, imgHeight);
+        };
+    }
+
+
+    function drawScanPoints(json) {
+
+        locationApi(function(loc_json){
+            const scale = 40;
+            const centerX = canvas.width / 2 + loc_json.robot_location.x_pos * scale
+            const centerY = canvas.height / 2 - loc_json.robot_location.y_pos * scale
+            
+            const ranges = json.data;
+            let angle = loc_json.robot_location.yaw + json.angle_min;
+
+            ctx.fillStyle = "red";
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height); 
+            drawMap();
+            for (let i = 0; i < ranges.length; i++) {
+                const r = ranges[i] / 1000; // mm → m (선택)
+
+
+                // 극좌표 → 직교좌표 (Canvas는 Y축 아래로 내려감)
+                const x = Math.cos(angle) * r * scale;
+                const y = Math.sin(angle) * r * scale;
+
+                const canvasX = centerX + x
+                const canvasY = centerY - y;
+
+                ctx.fillStyle = "red";
+
+                ctx.fillRect(canvasX, canvasY, 2, 2);
+                
+                angle += json.angle_increment// radian
+            }    
+        })
+      
+    }
+
+    const mapImg = new Image();
+    
+
+    mapdataApi()
+
+
+    setInterval(()=>{
+       scanApi(function(json){
+
+        if (json && json.data.length > 0) {
+            
+            drawScanPoints(json);
+        
+        } else {
+          resultBox.textContent = "스캔 결과를 찾을 수 없습니다.";
+        }
+
+       });
+    }, 500)
+
+    document.getElementById("scanButton").addEventListener("click", scanApi);
+
+    location_list = []
+
+    const recordBtn = document.getElementById("recordButton");
+
+    let recognition;
+
+    if ('webkitSpeechRecognition' in window) {
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = "ko-KR";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event) => {
+        const userText = event.results[0][0].transcript;
+        resultBox.innerText = `🧏 당신: ${userText}\n🤖 GPT 응답 중...`;
+        console.log(userText)
+
+        fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer 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`
+          },
+          body: JSON.stringify({
+            model: "o4-mini-2025-04-16",
+            messages: [
+            {
+              role: "system",
+              content: `
+              로봇 음성 인터페이스 백엔드용 프롬프트 (개선판)
+                ================================================
+
+                1. 역할
+                --------
+                당신은 사용자의 STT(음성 인식) 명령을 해석해, 로봇에게 **이동·위치 저장·대기** 중 하나의 행동을 지시하는 백엔드 엔진입니다.
+
+                2. 반드시 지켜야 할 출력 규칙
+                -----------------------------
+                - **항상** 아래 JSON **한 줄**만 반환합니다.  
+                - 마크다운·설명·코드블럭·개행은 **절대 포함하지 마세요**.
+
+                예시 형식
+                  {
+                    "location": "장소명 또는 알 수 없음",
+                    "reply": "사용자에게 들려줄 자연스러운 멘트",
+                    "cmd": "none | moveto x y yaw | savelocas 장소명 x y yaw"
+                  }
+
+                필드 설명
+                | 필드      | 의미                                                                                           |
+                |-----------|------------------------------------------------------------------------------------------------|
+                | location  | 사용자의 의도에 해당하는 장소명. 모호하거나 해당 없으면 "알 수 없음" |
+                | reply     | 친근한 대화 멘트(존댓말)                                                                        |
+                | cmd       | moveto x y yaw / savelocas 장소명 x y yaw / none                                         |
+
+                3. 매 턴 제공되는 정보
+                ----------------------
+                현재 위치 예시:
+                {
+                  "angle": 0.0,
+                  "speed": 0.0,
+                  "robot_location": { "x_pos": -0.2134, "y_pos": 0.2723, "yaw": -0.9305 },
+                  "status": "received"
+                }
+
+                저장된 장소 목록 예:
+                회의실 (x=1.2, y=-0.5, yaw=1.57)  
+                창고   (x=-3.3, y=0.2,  yaw=3.14)
+
+                4. 기본 행동 지침
+                -----------------
+                1. **장소 이동**  
+                  - 사용자가 말한 장소가 저장돼 있으면 moveto로 그 좌표를 반환.  
+                  - 오타·애칭 등 비슷한 표현은 최선 후보 매칭.  
+
+                2. **장소 저장**  
+                  - “여기를 ○○로 저장” 류 요청 → savelocas.  
+                  - 동일 이름 존재 시 ○○_1, ○○_2처럼 뒤에 숫자.  
+                  - **공백은 반드시 언더바(_)로 치환**.
+
+                3. **모호한 지시어**  
+                  - “여기”, “늘 가던 데”, “교수님 있는 곳” 등 문맥+태그로 추론.
+
+                4. **행동 없음**  
+                  - 명령 의도 없으면 cmd: "none".
+
+                5. 특수 명령 처리
+                ------------------
+
+                - **“[저/그] 위치에서 오른쪽(왼쪽/앞/뒤)으로 가볼래?”**  
+                  1) 기준 = **로봇의 현 yaw**.  
+                  2) 이동 거리 = 1 m.  
+                    - 오른쪽: yaw - 90°  
+                    - 왼쪽  : yaw + 90°  
+                    - 앞    : yaw  
+                    - 뒤    : yaw ± 180°  
+                  3) 새 좌표:  
+                    x' = x + cos(새각) * 0.5
+                    y' = y + sin(새각) * 0.5
+                  4) 그 좌표로 moveto. 적절 멘트 예: “옆으로 살짝 이동할게요!”
+
+                6. 예시
+                --------
+                입력 → 출력(JSON)
+                - “여기를 회의실로 저장해줘”  
+                  {"location":"회의실","reply":"회의실로 저장할게요.","cmd":"savelocas 회의실 1.1 -2.3 0.0"}
+
+                - “작업장으로 가자”  
+                  {"location":"작업장","reply":"작업장으로 이동할게요!","cmd":"moveto 0.5 -1.5 0.0"}
+
+                - “너는 지금 어디에 있어?” (미저장 위치)  
+                  {"location":"현재위치","reply":"지금 위치를 현재위치로 저장했어요!","cmd":"savelocas 현재위치 -0.21 0.27 -0.93"}
+
+                - “그 위치에서 오른쪽으로 가볼래”  
+                  {"location":"알 수 없음","reply":"옆으로 살짝 이동할게요!","cmd":"moveto 0.75 -0.46 -0.93"}
+
+                7. 주의
+                --------
+                - **반드시 JSON만** 출력.  
+                - 좌표·각도 값은 소수점 네 자리 유지.  
+                - 위치 이름 공백 → 언더바.  
+                - 숫자·수식 포함된 발화도 최대한 유추해 처리.
+
+              `},
+              { role: "user", content: "로봇의 현재 위치 : " + robot_loc + "\n\n" + "저장된 위치정보들" + location_list.join("\n\n") + userText }
+            ]
+          })
+        })
+        .then(res => res.json())
+        .then(data => {
+          console.log(data.choices?.[0]?.message?.content )
+          const reply_json = data.choices?.[0]?.message?.content || "(응답 없음)";
+          resultBox.innerText = `🧏 당신: ${userText}\n\n🤖 GPT: ${reply_json}`;
+          
+          const { reply, cmd } = JSON.parse(reply_json);
+          window.speechSynthesis.speak(new SpeechSynthesisUtterance(reply));  
+          
+          if(cmd.startsWith("moveto")) {
+          
+            console.log("이동 명령어 감지", cmd);
+            const [x, y, yaw] = cmd.replace("moveto ", "").split(" ");
+            resultBox.innerText += `\n\n🤖 이동 명령: ${cmd}`;
+            const xhr = new XMLHttpRequest();
+            console.log(`http://192.168.106.132:8080/api/navigation/goto?x=${x}&y=${y}&yaw=${yaw}`)
+            xhr.open("GET", `http://192.168.106.132:8080/api/navigation/goto?x=${x}&y=${y}&yaw=${yaw}`, true);
+          
+            xhr.onreadystatechange = function () {
+              if (xhr.readyState === XMLHttpRequest.DONE) {
+                if (xhr.status === 200) {
+                  console.log(xhr.responseText);
+                } else {
+                  
+                  console.log("❌ 요청 실패: " + xhr.status);
+                  resultBox.textContent = "❌ 요청 실패: " + xhr.status;
+                }
+              }
+            };
+
+            xhr.send();
+
+
+          }
+          else if(cmd.startsWith("savelocas")) {
+            const [location, x, y, yaw] = cmd.replace("savelocas ", "").split(" ");
+            console.log( cmd.split(" ")[1].split(" "))
+            location_list.push(location + `  x : ${x}, y : ${y}, yaw : ${yaw}`);
+            
+            console.log(location_list);
+          }
+          else if(cmd === "none") {
+            resultBox.innerText += `\n\n🤖 대기 중...`;
+          }
+          else {
+            resultBox.innerText += `\n\n🤖 알 수 없는 명령: ${cmd}`;
+          }
+
+          console.log("GPT 응답:", reply_json, "\n 유저:" , userText);
+        })
+        .catch(err => {
+          resultBox.innerText = "❌ 오류 발생: " + err.message;
+        });
+      };
+
+      recognition.onerror = (event) => {
+        resultBox.innerText = "에러: " + event.error;
+      };
+
+      recordBtn.addEventListener("mousedown", () => {
+        recordBtn.classList.add("recording");
+        recognition.start();
+        resultBox.innerText = "🎙️ 듣는 중...";
+
+        setTimeout(() => {
+            recognition.stop();
+        },8000);
+      });
+
+    } else {
+      alert("이 브라우저는 Web Speech API를 지원하지 않습니다.");
+    }
+  </script>
+</body>
+</html>
